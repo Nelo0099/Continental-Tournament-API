@@ -244,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // GET /api/player-stats/:id
     if (method === 'GET' && url.match(/^\/api\/player-stats\/[^/]+$/)) {
-      const id = url.split('/api/player-stats/')[1]
+      const id = decodeURIComponent(url.split('/api/player-stats/')[1])
       const row = (await query('SELECT * FROM player_stats WHERE game_account_id = $1', [id]))[0]
       if (!row) return json(res, { stats: null })
       return json(res, { stats: { gameAccountId: row.game_account_id, playerName: row.player_name, win: row.win, lose: row.lose, winRate: row.win + row.lose > 0 ? Math.round((row.win / (row.win + row.lose)) * 100) : 0, rankTier: row.rank_tier, leaderboardRank: row.leaderboard_rank, mmr: row.mmr, topHeroes: JSON.parse(row.top_heroes || '[]'), recentMatches: JSON.parse(row.recent_matches || '[]'), isPrivate: row.is_private === 1, lastUpdated: row.last_updated } })
@@ -252,7 +252,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // POST /api/player-stats/:id/fetch
     if (method === 'POST' && url.match(/^\/api\/player-stats\/[^/]+\/fetch$/)) {
-      const id = url.split('/api/player-stats/')[1].split('/')[0]
+      const id = decodeURIComponent(url.split('/api/player-stats/')[1].split('/')[0])
       const row = (await query('SELECT name FROM members WHERE game_account_id = $1', [id]))[0]
       const stats = await fetchPlayerStats(id, row?.name || 'Unknown')
       if (!stats) return json(res, { stats: null })
