@@ -119,34 +119,44 @@ const HERO_NAME: Record<string, string> = {"1":"antimage","2":"axe","3":"bane","
 
 function parseDotaId(gaid: string): string | null { const m = gaid.match(/\[U:\d+:(\d+)\]/); return m ? m[1] : null }
 
-async function fetchPlayerStats(gaid: string, name: string) {
+async function fetchPlayerStats(gaid: string, name: string): Promise<any> {
   const dotaId = parseDotaId(gaid)
-  if (!dotaId) return
+  if (!dotaId) return null
+  const [profile, wl, recent, heroes] = await Promise.all([
+    fetch(`https://api.opendota.com/api/players/${dotaId}`).then(r => r.json()),
+    fetch(`https://api.opendota.com/api/players/${dotaId}/wl`).then(r => r.json()),
+    fetch(`https://api.opendota.com/api/players/${dotaId}/recentMatches`).then(r => r.json()),
+    fetch(`https://api.opendota.com/api/players/${dotaId}/heroes`).then(r => r.json()),
+  ])
+  const isPrivate = (wl.win || 0) === 0 && (wl.lose || 0) === 0 && (recent || []).length === 0
+  const topHeroes = (heroes || []).sort((a: any, b: any) => b.games - a.games).slice(0, 3).map((h: any) => ({
+    heroId: h.hero_id, heroName: HERO_MAP[h.hero_id] || `#${h.hero_id}`,
+    heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[h.hero_id] || 'antimage'}.png`,
+    games: h.games, win: h.win, winRate: h.games > 0 ? Math.round((h.win / h.games) * 100) : 0,
+  }))
+  const matches = (recent || []).slice(0, 5).map((m: any) => ({
+    matchId: m.match_id, heroId: m.hero_id, heroName: HERO_MAP[m.hero_id] || `#${m.hero_id}`,
+    heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[m.hero_id] || 'antimage'}.png`,
+    won: m.player_slot < 128 ? m.radiant_win : !m.radiant_win,
+    kills: m.kills, deaths: m.deaths, assists: m.assists, duration: m.duration,
+    startTime: m.start_time, gpm: m.gold_per_min, xpm: m.xp_per_min, heroDamage: m.hero_damage,
+  }))
+  const stats = {
+    gameAccountId: gaid, playerName: name,
+    win: wl.win || 0, lose: wl.lose || 0,
+    winRate: (wl.win || 0) + (wl.lose || 0) > 0 ? Math.round(((wl.win || 0) / ((wl.win || 0) + (wl.lose || 0))) * 100) : 0,
+    rankTier: profile.rank_tier || 0, leaderboardRank: profile.leaderboard_rank || null,
+    mmr: profile.computed_mmr || 0, topHeroes, recentMatches: matches,
+    isPrivate, lastUpdated: new Date().toISOString(),
+  }
+  // Best-effort store in DB (don't block on failure)
   try {
-    const [profile, wl, recent, heroes] = await Promise.all([
-      fetch(`https://api.opendota.com/api/players/${dotaId}`).then(r => r.json()),
-      fetch(`https://api.opendota.com/api/players/${dotaId}/wl`).then(r => r.json()),
-      fetch(`https://api.opendota.com/api/players/${dotaId}/recentMatches`).then(r => r.json()),
-      fetch(`https://api.opendota.com/api/players/${dotaId}/heroes`).then(r => r.json()),
-    ])
-    const isPrivate = (wl.win || 0) === 0 && (wl.lose || 0) === 0 && (recent || []).length === 0
-    const topHeroes = (heroes || []).sort((a: any, b: any) => b.games - a.games).slice(0, 3).map((h: any) => ({
-      heroId: h.hero_id, heroName: HERO_MAP[h.hero_id] || `#${h.hero_id}`,
-      heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[h.hero_id] || 'antimage'}.png`,
-      games: h.games, win: h.win, winRate: h.games > 0 ? Math.round((h.win / h.games) * 100) : 0,
-    }))
-    const matches = (recent || []).slice(0, 5).map((m: any) => ({
-      matchId: m.match_id, heroId: m.hero_id, heroName: HERO_MAP[m.hero_id] || `#${m.hero_id}`,
-      heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[m.hero_id] || 'antimage'}.png`,
-      won: m.player_slot < 128 ? m.radiant_win : !m.radiant_win,
-      kills: m.kills, deaths: m.deaths, assists: m.assists, duration: m.duration,
-      startTime: m.start_time, gpm: m.gold_per_min, xpm: m.xp_per_min, heroDamage: m.hero_damage,
-    }))
     await query(
       `INSERT INTO player_stats (game_account_id, player_name, win, lose, rank_tier, leaderboard_rank, mmr, top_heroes, recent_matches, is_private, last_updated) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) ON CONFLICT (game_account_id) DO UPDATE SET player_name=EXCLUDED.player_name, win=EXCLUDED.win, lose=EXCLUDED.lose, rank_tier=EXCLUDED.rank_tier, leaderboard_rank=EXCLUDED.leaderboard_rank, mmr=EXCLUDED.mmr, top_heroes=EXCLUDED.top_heroes, recent_matches=EXCLUDED.recent_matches, is_private=EXCLUDED.is_private, last_updated=EXCLUDED.last_updated`,
-      [gaid, name, wl.win || 0, wl.lose || 0, profile.rank_tier || 0, profile.leaderboard_rank || null, profile.computed_mmr || 0, JSON.stringify(topHeroes), JSON.stringify(matches), isPrivate ? 1 : 0]
+      [gaid, name, stats.win, stats.lose, stats.rankTier, stats.leaderboardRank, stats.mmr, JSON.stringify(topHeroes), JSON.stringify(matches), isPrivate ? 1 : 0]
     )
-  } catch (e: any) { console.error(`Stats error ${name}:`, e.message) }
+  } catch (e: any) { console.error(`DB store failed for ${name}:`, e.message) }
+  return stats
 }
 
 async function fetchBracket() {
@@ -207,6 +217,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (method === 'GET' && url === '/api/bracket') {
       const state = await query("SELECT value FROM meta WHERE key = 'bracketState'")
       const stages = await query("SELECT value FROM meta WHERE key = 'bracketStages'")
+      if (!state[0]?.value || state[0].value === 'UNKNOWN') {
+        try { await fetchBracket() } catch (e: any) { console.error('Auto-fetch bracket failed:', e.message) }
+        const freshState = await query("SELECT value FROM meta WHERE key = 'bracketState'")
+        const freshStages = await query("SELECT value FROM meta WHERE key = 'bracketStages'")
+        return json(res, { state: freshState[0]?.value || 'UNKNOWN', stages: freshStages[0] ? JSON.parse(freshStages[0].value) : [] })
+      }
       return json(res, { state: state[0]?.value || 'UNKNOWN', stages: stages[0] ? JSON.parse(stages[0].value) : [] })
     }
 
@@ -238,10 +254,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (method === 'POST' && url.match(/^\/api\/player-stats\/[^/]+\/fetch$/)) {
       const id = url.split('/api/player-stats/')[1].split('/')[0]
       const row = (await query('SELECT name FROM members WHERE game_account_id = $1', [id]))[0]
-      await fetchPlayerStats(id, row?.name || 'Unknown')
-      const stats = (await query('SELECT * FROM player_stats WHERE game_account_id = $1', [id]))[0]
+      const stats = await fetchPlayerStats(id, row?.name || 'Unknown')
       if (!stats) return json(res, { stats: null })
-      return json(res, { stats: { gameAccountId: stats.game_account_id, playerName: stats.player_name, win: stats.win, lose: stats.lose, winRate: stats.win + stats.lose > 0 ? Math.round((stats.win / (stats.win + stats.lose)) * 100) : 0, rankTier: stats.rank_tier, leaderboardRank: stats.leaderboard_rank, mmr: stats.mmr, topHeroes: JSON.parse(stats.top_heroes || '[]'), recentMatches: JSON.parse(stats.recent_matches || '[]'), isPrivate: stats.is_private === 1, lastUpdated: stats.last_updated } })
+      return json(res, { stats })
     }
 
     // PUT /api/teams/:id/video
