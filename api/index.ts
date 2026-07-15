@@ -1,4 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const DATABASE_URL = process.env.DATABASE_URL!
 const APP_ID = 'ac90e984-9dff-4368-d8f5-08dee052f0fb'
@@ -31,6 +31,16 @@ async function ensureTables() {
 }
 
 let tablesReady = false
+// Simple in-memory cache with TTL
+const cache = new Map<string, { data: any; expires: number }>()
+function getCached(key: string, ttlMs: number): any | null {
+  const entry = cache.get(key)
+  if (entry && entry.expires > Date.now()) return entry.data
+  return null
+}
+function setCache(key: string, data: any, ttlMs: number) {
+  cache.set(key, { data, expires: Date.now() + ttlMs })
+}
 
 // Auth token cache
 let currentToken: { value: string; expiresAt: string } | null = null
@@ -193,6 +203,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // GET /api/teams
     if (method === 'GET' && url === '/api/teams') {
+      const cached = getCached('teams', 60000)
+      if (cached) return json(res, cached)
       const countResult = await query('SELECT COUNT(*) as count FROM teams')
       if (Number(countResult[0]?.count) === 0) {
         try { await fetchAndStoreTeams() } catch (e: any) { console.error('Auto-refresh failed:', e.message) }
@@ -204,7 +216,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         result.push({ id: t.id, name: t.name, logo: t.logo, wins: t.wins, losses: t.losses, videoUrl: t.video_url || '', members: members.map((m: any) => ({ name: m.name, role: m.role, gameAccountId: m.game_account_id, avatar: m.avatar, profileUrl: m.profile_url, captain: m.captain === 1 })) })
       }
       const lastUpdated = await query("SELECT value FROM meta WHERE key = 'lastUpdated'")
-      return json(res, { teams: result, lastUpdated: lastUpdated[0] ? Number(lastUpdated[0].value) : null })
+      const teamsResponse = { teams: result, lastUpdated: lastUpdated[0] ? Number(lastUpdated[0].value) : null }
+      setCache('teams', teamsResponse, 60000)
+      return json(res, teamsResponse)
     }
 
     // POST /api/refresh
@@ -215,6 +229,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // GET /api/bracket
     if (method === 'GET' && url === '/api/bracket') {
+      const cachedBracket = getCached('bracket', 60000)
+      if (cachedBracket) return json(res, cachedBracket)
       const state = await query("SELECT value FROM meta WHERE key = 'bracketState'")
       const stages = await query("SELECT value FROM meta WHERE key = 'bracketStages'")
       if (!state[0]?.value || state[0].value === 'UNKNOWN') {
@@ -273,3 +289,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, { error: err.message }, 500)
   }
 }
+
+
