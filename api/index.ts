@@ -337,6 +337,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+
+    // GET /api/match/:id - fetch match detail from OpenDota
+    if (method === 'GET' && url.match(/^\/api\/match\/[^/]+$/)) {
+      const matchId = url.split('/api/match/')[1]
+      const cacheKey = 'match-' + matchId
+      const cached = getCached(cacheKey, 300000) // 5min cache
+      if (cached) return json(res, cached)
+      try {
+        const resp = await fetch('https://api.opendota.com/api/matches/' + matchId)
+        if (!resp.ok) return json(res, { error: 'Match not found' }, 404)
+        const data = await resp.json()
+        setCache(cacheKey, data, 300000)
+        return json(res, data)
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch match' }, 500)
+      }
+    }
+
+    // GET /api/heroes - fetch all heroes from OpenDota
+    if (method === 'GET' && url === '/api/heroes') {
+      const cached = getCached('heroes', 86400000) // 24h cache
+      if (cached) return json(res, cached)
+      try {
+        const resp = await fetch('https://api.opendota.com/api/heroes')
+        if (!resp.ok) return json(res, { error: 'Failed' }, 500)
+        const data = await resp.json()
+        setCache('heroes', data, 86400000)
+        return json(res, data)
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch heroes' }, 500)
+      }
+    }
+
+    // GET /api/items - fetch all items from OpenDota
+    if (method === 'GET' && url === '/api/items') {
+      const cached = getCached('items', 86400000)
+      if (cached) return json(res, cached)
+      try {
+        const resp = await fetch('https://api.opendota.com/api/constants/items')
+        if (!resp.ok) return json(res, { error: 'Failed' }, 500)
+        const data = await resp.json()
+        setCache('items', data, 86400000)
+        return json(res, data)
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch items' }, 500)
+      }
+    }
+
     return json(res, { error: 'Not found' }, 404)
   } catch (err: any) {
     console.error('API Error:', err.message)
