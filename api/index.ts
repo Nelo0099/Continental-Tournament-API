@@ -142,11 +142,13 @@ async function fetchPlayerStats(gaid: string, name: string): Promise<any> {
   const topHeroes = (heroes || []).sort((a: any, b: any) => b.games - a.games).slice(0, 3).map((h: any) => ({
     heroId: h.hero_id, heroName: HERO_MAP[h.hero_id] || `#${h.hero_id}`,
     heroImage: `/api/hero-image/${HERO_NAME[h.hero_id] || 'antimage'}.png`,
+      heroVideo: `/api/hero-video/${HERO_NAME[h.hero_id] || 'antimage'}.webm`,
     games: h.games, win: h.win, winRate: h.games > 0 ? Math.round((h.win / h.games) * 100) : 0,
   }))
   const matches = (recent || []).slice(0, 5).map((m: any) => ({
     matchId: m.match_id, heroId: m.hero_id, heroName: HERO_MAP[m.hero_id] || `#${m.hero_id}`,
     heroImage: `/api/hero-image/${HERO_NAME[m.hero_id] || 'antimage'}.png`,
+      heroVideo: `/api/hero-video/${HERO_NAME[m.hero_id] || 'antimage'}.webm`,
     won: m.player_slot < 128 ? m.radiant_win : !m.radiant_win,
     kills: m.kills, deaths: m.deaths, assists: m.assists, duration: m.duration,
     startTime: m.start_time, gpm: m.gold_per_min, xpm: m.xp_per_min, heroDamage: m.hero_damage,
@@ -283,6 +285,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, { success: true })
     }
 
+
+
+    // GET /api/hero-video/:name - proxy hero videos from Steam CDN
+    if (method === 'GET' && url.match(/^\/api\/hero-video\/[^/]+$/)) {
+      const heroName = url.split('/api/hero-video/')[1]
+      const cacheKey = 'video-' + heroName
+      const cached = getCached(cacheKey, 86400000) // 24h cache
+      if (cached) {
+        res.setHeader('Content-Type', cached.contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(cached.data)
+      }
+      try {
+        const videoUrl = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/videos/dota_react/heroes/' + heroName
+        const resp = await fetch(videoUrl)
+        if (!resp.ok) return json(res, { error: 'Video not found' }, 404)
+        const buffer = await resp.arrayBuffer()
+        const contentType = resp.headers.get('content-type') || 'video/webm'
+        setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
+        res.setHeader('Content-Type', contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(Buffer.from(buffer))
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch hero video' }, 500)
+      }
+    }
 
     // GET /api/hero-image/:name - proxy hero images from Steam CDN
     if (method === 'GET' && url.match(/^\/api\/hero-image\/[^/]+$/)) {
