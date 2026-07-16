@@ -368,22 +368,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       try {
         // Fetch item constants from OpenDota (with retry)
-        let itemsData = getCached('items-constants', 3600000) // 1h cache
-        if (!itemsData) {
+        let idMap = getCached('items-id-map', 3600000)
+        if (!idMap) {
           for (let attempt = 0; attempt < 3; attempt++) {
             try {
               const itemsResp = await fetch('https://api.opendota.com/api/constants/items')
               if (itemsResp.ok) {
-                itemsData = await itemsResp.json()
-                setCache('items-constants', itemsData, 3600000)
+                const raw = await itemsResp.json()
+                idMap = {}
+                for (const item of Object.values(raw)) {
+                  if (item.id != null) idMap[String(item.id)] = item
+                }
+                setCache('items-id-map', idMap, 3600000)
                 break
               }
             } catch (e) { if (attempt === 2) throw e }
             await new Promise(r => setTimeout(r, 1000))
           }
         }
-        if (!itemsData) return json(res, { error: 'Constants unavailable' }, 503)
-        const item = itemsData[itemId]
+        if (!idMap) return json(res, { error: 'Constants unavailable' }, 503)
+        const item = idMap[itemId]
         if (!item || !item.dname) return json(res, { error: 'Item not found' }, 404)
         // Build slug from dname: "Black King Bar" -> "black_king_bar"
         let slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
