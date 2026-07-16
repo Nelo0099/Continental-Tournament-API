@@ -367,33 +367,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).send(cached.data)
       }
       try {
-        // Get item name from OpenDota constants
-        let itemsData = getCached('items-constants', 86400000)
+        // Fetch item constants from OpenDota (with retry)
+        let itemsData = getCached('items-constants', 3600000) // 1h cache
         if (!itemsData) {
-          const itemsResp = await fetch('https://api.opendota.com/api/constants/items')
-          if (!itemsResp.ok) return json(res, { error: 'Constants failed' }, 502)
-          itemsData = await itemsResp.json()
-          setCache('items-constants', itemsData, 86400000)
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const itemsResp = await fetch('https://api.opendota.com/api/constants/items')
+              if (itemsResp.ok) {
+                itemsData = await itemsResp.json()
+                setCache('items-constants', itemsData, 3600000)
+                break
+              }
+            } catch (e) { if (attempt === 2) throw e }
+            await new Promise(r => setTimeout(r, 1000))
+          }
         }
+        if (!itemsData) return json(res, { error: 'Constants unavailable' }, 503)
         const item = itemsData[itemId]
         if (!item || !item.dname) return json(res, { error: 'Item not found' }, 404)
-        // Convert item name to slug: "Black King Bar" -> "black_king_bar"
-        const slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-        const imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-        const imgResp = await fetch(imgUrl)
-        if (!imgResp.ok) {
-          // Fallback: try the local_name or key
-          const slug2 = item.key?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || slug
-          const imgUrl2 = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug2 + '.webp'
-          const imgResp2 = await fetch(imgUrl2)
-          if (!imgResp2.ok) return json(res, { error: 'Image not found' }, 404)
-          const buffer = await imgResp2.arrayBuffer()
-          const contentType = imgResp2.headers.get('content-type') || 'image/webp'
-          setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
-          res.setHeader('Content-Type', contentType)
-          res.setHeader('Cache-Control', 'public, max-age=86400')
-          return res.status(200).send(Buffer.from(buffer))
+        // Build slug from dname: "Black King Bar" -> "black_king_bar"
+        let slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+        let imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
+        let imgResp = await fetch(imgUrl)
+        // Fallback: try item key
+        if (!imgResp.ok && item.key) {
+          slug = item.key.toLowerCase().replace(/[^a-z0-9]+/g, '_')
+          imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
+          imgResp = await fetch(imgUrl)
         }
+        if (!imgResp.ok) return json(res, { error: 'Image not found for ' + slug }, 404)
         const buffer = await imgResp.arrayBuffer()
         const contentType = imgResp.headers.get('content-type') || 'image/webp'
         setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
@@ -406,6 +408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // GET /api/heroes - fetch all heroes from OpenDota
+
     if (method === 'GET' && url === '/api/heroes') {
       const cached = getCached('heroes', 86400000) // 24h cache
       if (cached) return json(res, cached)
