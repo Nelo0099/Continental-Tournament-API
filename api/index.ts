@@ -141,12 +141,12 @@ async function fetchPlayerStats(gaid: string, name: string): Promise<any> {
   const isPrivate = (wl.win || 0) === 0 && (wl.lose || 0) === 0 && (recent || []).length === 0
   const topHeroes = (heroes || []).sort((a: any, b: any) => b.games - a.games).slice(0, 3).map((h: any) => ({
     heroId: h.hero_id, heroName: HERO_MAP[h.hero_id] || `#${h.hero_id}`,
-    heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[h.hero_id] || 'antimage'}.png`,
+    heroImage: `/api/hero-image/${HERO_NAME[h.hero_id] || 'antimage'}.png`,
     games: h.games, win: h.win, winRate: h.games > 0 ? Math.round((h.win / h.games) * 100) : 0,
   }))
   const matches = (recent || []).slice(0, 5).map((m: any) => ({
     matchId: m.match_id, heroId: m.hero_id, heroName: HERO_MAP[m.hero_id] || `#${m.hero_id}`,
-    heroImage: `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${HERO_NAME[m.hero_id] || 'antimage'}.png`,
+    heroImage: `/api/hero-image/${HERO_NAME[m.hero_id] || 'antimage'}.png`,
     won: m.player_slot < 128 ? m.radiant_win : !m.radiant_win,
     kills: m.kills, deaths: m.deaths, assists: m.assists, duration: m.duration,
     startTime: m.start_time, gpm: m.gold_per_min, xpm: m.xp_per_min, heroDamage: m.hero_damage,
@@ -281,6 +281,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = req.body || {}
       await query('UPDATE teams SET video_url = $1 WHERE id = $2', [body.videoUrl || '', id])
       return json(res, { success: true })
+    }
+
+
+    // GET /api/hero-image/:name - proxy hero images from Steam CDN
+    if (method === 'GET' && url.match(/^\/api\/hero-image\/[^/]+$/)) {
+      const heroName = url.split('/api/hero-image/')[1]
+      const cacheKey = 'hero-' + heroName
+      const cached = getCached(cacheKey, 86400000) // 24h cache
+      if (cached) {
+        res.setHeader('Content-Type', cached.contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(cached.data)
+      }
+      try {
+        const heroUrl = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/' + heroName
+        const resp = await fetch(heroUrl)
+        if (!resp.ok) return json(res, { error: 'Hero not found' }, 404)
+        const buffer = await resp.arrayBuffer()
+        const contentType = resp.headers.get('content-type') || 'image/png'
+        setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
+        res.setHeader('Content-Type', contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(Buffer.from(buffer))
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch hero image' }, 500)
+      }
     }
 
     return json(res, { error: 'Not found' }, 404)
