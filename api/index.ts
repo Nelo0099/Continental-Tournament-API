@@ -355,6 +355,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+
+    // GET /api/item-image/:id - proxy item images from Steam CDN
+    if (method === 'GET' && url.match(/^\/api\/item-image\/[^/]+$/)) {
+      const itemId = url.split('/api/item-image/')[1]
+      const cacheKey = 'item-' + itemId
+      const cached = getCached(cacheKey, 86400000) // 24h cache
+      if (cached) {
+        res.setHeader('Content-Type', cached.contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(cached.data)
+      }
+      try {
+        const itemsResp = await fetch('https://api.opendota.com/api/constants/items')
+        const items = await itemsResp.json()
+        const item = items[itemId]
+        if (!item || !item.img) return json(res, { error: 'Item not found' }, 404)
+        const imgUrl = 'https://cdn.cloudflare.steamstatic.com' + item.img
+        const resp = await fetch(imgUrl)
+        if (!resp.ok) return json(res, { error: 'Image not found' }, 404)
+        const buffer = await resp.arrayBuffer()
+        const contentType = resp.headers.get('content-type') || 'image/png'
+        setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
+        res.setHeader('Content-Type', contentType)
+        res.setHeader('Cache-Control', 'public, max-age=86400')
+        return res.status(200).send(Buffer.from(buffer))
+      } catch (e) {
+        return json(res, { error: 'Failed to fetch item image' }, 500)
+      }
+    }
+
     // GET /api/heroes - fetch all heroes from OpenDota
     if (method === 'GET' && url === '/api/heroes') {
       const cached = getCached('heroes', 86400000) // 24h cache
