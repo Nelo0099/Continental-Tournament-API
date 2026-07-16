@@ -430,16 +430,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // GET /api/items - fetch all items from OpenDota
+    // GET /api/items - fetch all items with dotacoach CDN URLs
     if (method === 'GET' && url === '/api/items') {
-      const cached = getCached('items', 86400000)
+      const cached = getCached('items-v2', 86400000)
       if (cached) return json(res, cached)
       try {
         const resp = await fetch('https://api.opendota.com/api/constants/items')
         if (!resp.ok) return json(res, { error: 'Failed' }, 500)
-        const data = await resp.json()
-        setCache('items', data, 86400000)
-        return json(res, data)
+        const raw = await resp.json()
+        // Enrich with dotacoach CDN URLs
+        const enriched = {}
+        for (const [key, item] of Object.entries(raw)) {
+          const slug = item.dname ? item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') : key
+          enriched[key] = {
+            id: item.id,
+            dname: item.dname || '',
+            img: item.img || '',
+            cdnUrl: 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
+          }
+        }
+        setCache('items-v2', enriched, 86400000)
+        return json(res, enriched)
       } catch (e) {
         return json(res, { error: 'Failed to fetch items' }, 500)
       }
