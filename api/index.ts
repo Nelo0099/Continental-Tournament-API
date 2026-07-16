@@ -388,6 +388,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             id: item.id,
             dname: item.dname || '',
             img: item.img || '',
+            key: key,
             cdnUrl: 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
           }
         }
