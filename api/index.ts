@@ -388,12 +388,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Build slug from dname: "Black King Bar" -> "black_king_bar"
         let slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
         let imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-        let imgResp = await fetch(imgUrl)
+        let imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
         // Fallback: try item key
         if (!imgResp.ok && item.key) {
           slug = item.key.toLowerCase().replace(/[^a-z0-9]+/g, '_')
           imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-          imgResp = await fetch(imgUrl)
+          imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
         }
         if (!imgResp.ok) return json(res, { error: 'Image not found for ' + slug }, 404)
         const buffer = await imgResp.arrayBuffer()
