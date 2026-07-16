@@ -356,65 +356,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
 
-        // GET /api/item-image/:id - proxy item images
-    if (method === 'GET' && url.match(/^\/api\/item-image\/[^/]+$/)) {
-      const itemId = url.split('/api/item-image/')[1]
-      const cacheKey = 'item-img-' + itemId
-      const cached = getCached(cacheKey, 86400000)
-      if (cached) {
-        res.setHeader('Content-Type', cached.contentType)
-        res.setHeader('Cache-Control', 'public, max-age=86400')
-        return res.status(200).send(cached.data)
-      }
-      try {
-        // Build ID->slug map from OpenDota constants
-        let idToSlug = getCached('items-id-slug', 3600000)
-        if (!idToSlug) {
-          const resp = await fetch('https://api.opendota.com/api/constants/items')
-          if (!resp.ok) throw new Error('Constants ' + resp.status)
-          const raw = await resp.json()
-          idToSlug = {}
-          for (const item of Object.values(raw)) {
-            if (item.id != null && item.dname) {
-              // Build slug from dname: "Blink Dagger" -> "blink"
-              const slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-              idToSlug[String(item.id)] = slug
-            }
-          }
-          setCache('items-id-slug', idToSlug, 3600000)
-        }
-        const slug = idToSlug[itemId]
-        if (!slug) return json(res, { error: 'Unknown item ' + itemId }, 404)
-        const imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-        const imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        if (!imgResp.ok) return json(res, { error: 'Not found: ' + slug }, 404)
-        const buffer = await imgResp.arrayBuffer()
-        const contentType = imgResp.headers.get('content-type') || 'image/webp'
-        setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
-        res.setHeader('Content-Type', contentType)
-        res.setHeader('Cache-Control', 'public, max-age=86400')
-        return res.status(200).send(Buffer.from(buffer))
-      } catch (e) {
-        return json(res, { error: e.message }, 500)
-      }
-    }
-
-// GET /api/diag-items - diagnostic for item proxy
-    if (method === 'GET' && url === '/api/diag-items') {
-      try {
-        const resp = await fetch('https://api.opendota.com/api/constants/items')
-        const status = resp.status
-        if (!resp.ok) return json(res, { error: 'OpenDota returned ' + status })
-        const data = await resp.json()
-        const count = Object.keys(data).length
-        const item1 = data['1']
-        return json(res, { itemsCount: count, item1: item1 ? { dname: item1.dname, key: item1.key } : null })
-      } catch (e) {
-        return json(res, { error: e.message })
-      }
-    }
-
-    // GET /api/heroes - fetch all heroes from OpenDota
+        // GET /api/heroes - fetch all heroes from OpenDota
 
     if (method === 'GET' && url === '/api/heroes') {
       const cached = getCached('heroes', 86400000) // 24h cache
@@ -465,5 +407,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 
-
-// redeploy 2026-07-16 15:49:03
+ 15:49:03
