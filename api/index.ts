@@ -407,6 +407,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // GET /api/diag-items - diagnostic for item proxy
+    if (method === 'GET' && url === '/api/diag-items') {
+      try {
+        const resp = await fetch('https://api.opendota.com/api/constants/items')
+        const status = resp.status
+        if (!resp.ok) return json(res, { error: 'OpenDota returned ' + status })
+        const data = await resp.json()
+        const count = Object.keys(data).length
+        const item1 = data['1']
+        return json(res, { itemsCount: count, item1: item1 ? { dname: item1.dname, key: item1.key } : null })
+      } catch (e) {
+        return json(res, { error: e.message })
+      }
+    }
+
     // GET /api/heroes - fetch all heroes from OpenDota
 
     if (method === 'GET' && url === '/api/heroes') {
