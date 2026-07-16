@@ -356,7 +356,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
 
-    // GET /api/item-image/:id - proxy item images via dotacoach.gg CDN
+        // GET /api/item-image/:id - proxy item images
     if (method === 'GET' && url.match(/^\/api\/item-image\/[^/]+$/)) {
       const itemId = url.split('/api/item-image/')[1]
       const cacheKey = 'item-img-' + itemId
@@ -367,39 +367,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).send(cached.data)
       }
       try {
-        // Fetch item constants from OpenDota (with retry)
-        let idMap = getCached('items-id-map', 3600000)
-        if (!idMap) {
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const itemsResp = await fetch('https://api.opendota.com/api/constants/items')
-              if (itemsResp.ok) {
-                const raw = await itemsResp.json()
-                idMap = {}
-                for (const item of Object.values(raw)) {
-                  if (item.id != null) idMap[String(item.id)] = item
-                }
-                setCache('items-id-map', idMap, 3600000)
-                break
-              }
-            } catch (e) { if (attempt === 2) throw e }
-            await new Promise(r => setTimeout(r, 1000))
+        // Build ID->slug map from OpenDota constants
+        let idToSlug = getCached('items-id-slug', 3600000)
+        if (!idToSlug) {
+          const resp = await fetch('https://api.opendota.com/api/constants/items')
+          if (!resp.ok) throw new Error('Constants ' + resp.status)
+          const raw = await resp.json()
+          idToSlug = {}
+          for (const item of Object.values(raw)) {
+            if (item.id != null && item.dname) {
+              // Build slug from dname: "Blink Dagger" -> "blink"
+              const slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+              idToSlug[String(item.id)] = slug
+            }
           }
+          setCache('items-id-slug', idToSlug, 3600000)
         }
-        if (!idMap) return json(res, { error: 'Constants unavailable' }, 503)
-        const item = idMap[itemId]
-        if (!item || !item.dname) return json(res, { error: 'Item not found' }, 404)
-        // Build slug from dname: "Black King Bar" -> "black_king_bar"
-        let slug = item.dname.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-        let imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-        let imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        // Fallback: try item key
-        if (!imgResp.ok && item.key) {
-          slug = item.key.toLowerCase().replace(/[^a-z0-9]+/g, '_')
-          imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
-          imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        }
-        if (!imgResp.ok) return json(res, { error: 'Image not found for ' + slug }, 404)
+        const slug = idToSlug[itemId]
+        if (!slug) return json(res, { error: 'Unknown item ' + itemId }, 404)
+        const imgUrl = 'https://game.dotacoach.gg/vpk/panorama/images/items/' + slug + '.webp'
+        const imgResp = await fetch(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+        if (!imgResp.ok) return json(res, { error: 'Not found: ' + slug }, 404)
         const buffer = await imgResp.arrayBuffer()
         const contentType = imgResp.headers.get('content-type') || 'image/webp'
         setCache(cacheKey, { data: Buffer.from(buffer), contentType }, 86400000)
@@ -407,11 +395,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.setHeader('Cache-Control', 'public, max-age=86400')
         return res.status(200).send(Buffer.from(buffer))
       } catch (e) {
-        return json(res, { error: 'Failed: ' + e.message }, 500)
+        return json(res, { error: e.message }, 500)
       }
     }
 
-    // GET /api/diag-items - diagnostic for item proxy
+// GET /api/diag-items - diagnostic for item proxy
     if (method === 'GET' && url === '/api/diag-items') {
       try {
         const resp = await fetch('https://api.opendota.com/api/constants/items')
