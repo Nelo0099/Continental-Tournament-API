@@ -298,7 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).send(cached.data)
       }
       try {
-        const videoUrl = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/videos/dota_react/heroes/' + heroName
+        const videoUrl = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/' + heroName
         const resp = await fetch(videoUrl)
         if (!resp.ok) return json(res, { error: 'Video not found' }, 404)
         const buffer = await resp.arrayBuffer()
