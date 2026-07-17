@@ -28,6 +28,7 @@ async function ensureTables() {
   await query(`CREATE TABLE IF NOT EXISTS members (id SERIAL PRIMARY KEY, team_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT DEFAULT '', game_account_id TEXT DEFAULT '', avatar TEXT DEFAULT '', profile_url TEXT DEFAULT '', captain INTEGER DEFAULT 0)`)
   await query(`CREATE TABLE IF NOT EXISTS player_stats (game_account_id TEXT PRIMARY KEY, player_name TEXT DEFAULT '', win INTEGER DEFAULT 0, lose INTEGER DEFAULT 0, rank_tier INTEGER DEFAULT 0, leaderboard_rank INTEGER, mmr REAL DEFAULT 0, top_heroes TEXT DEFAULT '[]', recent_matches TEXT DEFAULT '[]', is_private INTEGER DEFAULT 0, last_updated TIMESTAMPTZ DEFAULT NOW())`)
   await query(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`)
+  await query(`CREATE TABLE IF NOT EXISTS match_cache (match_id TEXT PRIMARY KEY, data JSONB NOT NULL, cached_at TIMESTAMPTZ DEFAULT NOW())`)
 }
 
 let tablesReady = false
@@ -186,6 +187,19 @@ async function fetchBracket() {
   await query("INSERT INTO meta (key, value) VALUES ('bracketStages', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [JSON.stringify(t.stages)])
 }
 
+
+// Fetch and cache match from OpenDota (saves to Neon DB)
+async function fetchAndCacheMatch(matchId: string): Promise<any> {
+  const resp = await fetch('https://api.opendota.com/api/matches/' + matchId)
+  if (!resp.ok) throw new Error('OpenDota failed: ' + resp.status)
+  const data = await resp.json()
+  await query(
+    'INSERT INTO match_cache (match_id, data, cached_at) VALUES ($1, $2, NOW()) ON CONFLICT (match_id) DO UPDATE SET data = EXCLUDED.data, cached_at = NOW()',
+    [matchId, JSON.stringify(data)]
+  )
+  return data
+}
+
 // Response helper
 function json(res: VercelResponse, data: any, status = 200) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -338,20 +352,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
 
-    // GET /api/match/:id - fetch match detail from OpenDota
+    // GET /api/match/:id - cached from Neon DB (7 days), fallback to OpenDota
     if (method === 'GET' && url.match(/^\/api\/match\/[^/]+$/)) {
       const matchId = url.split('/api/match/')[1]
-      const cacheKey = 'match-' + matchId
-      const cached = getCached(cacheKey, 300000) // 5min cache
-      if (cached) return json(res, cached)
+      const memCache = getCached('match-' + matchId, 300000)
+      if (memCache) return json(res, memCache)
+      const cached = await query('SELECT data, cached_at FROM match_cache WHERE match_id = $1', [matchId])
+      if (cached.length > 0) {
+        const age = Date.now() - new Date(cached[0].cached_at).getTime()
+        if (age < 7 * 24 * 60 * 60 * 1000) {
+          setCache('match-' + matchId, cached[0].data, 300000)
+          return json(res, cached[0].data)
+        }
+      }
       try {
-        const resp = await fetch('https://api.opendota.com/api/matches/' + matchId)
-        if (!resp.ok) return json(res, { error: 'Match not found' }, 404)
-        const data = await resp.json()
-        setCache(cacheKey, data, 300000)
+        const data = await fetchAndCacheMatch(matchId)
+        setCache('match-' + matchId, data, 300000)
         return json(res, data)
       } catch (e) {
-        return json(res, { error: 'Failed to fetch match' }, 500)
+        return json(res, { error: 'Failed: ' + e.message }, 500)
+      }
+    }
+
+    // POST /api/match/:id/cache - force refresh
+    if (method === 'POST' && url.match(/^\/api\/match\/[^/]+\/cache$/)) {
+      const matchId = url.split('/api/match/')[1].split('/')[0]
+      try {
+        const data = await fetchAndCacheMatch(matchId)
+        cache.delete('match-' + matchId)
+        return json(res, { success: true, matchId })
+      } catch (e) {
+        return json(res, { error: e.message }, 500)
       }
     }
 
