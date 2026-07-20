@@ -213,6 +213,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Cron endpoint - auto-refresh teams and bracket
   const url = req.url || ''
+  // Debug: log the URL for cron requests
+  if (url.includes('cron')) {
+    console.log('CRON REQUEST URL:', url, 'METHOD:', req.method)
+  }
   if (url === '/api/cron' || url === '/cron') {
     try {
       if (!tablesReady) { await ensureTables(); tablesReady = true }
