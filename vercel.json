@@ -3,6 +3,7 @@
     { "path": "/api/cron", "schedule": "*/10 * * * *" }
   ],
   "rewrites": [
+    { "source": "/api/cron", "destination": "/api/cron.ts" },
     { "source": "/api/((?!cron).*)", "destination": "/api/index.ts" }
   ],
   "headers": [
