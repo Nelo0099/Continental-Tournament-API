@@ -1,17 +1,32 @@
 {
   "crons": [
-    { "path": "/api/cron", "schedule": "*/10 * * * *" }
+    {
+      "path": "/api/cron",
+      "schedule": "*/10 * * * *"
+    }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
+    }
   ],
   "headers": [
     {
-      "source": "/api/(?!cron)(.*)",
+      "source": "/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
       ]
     }
   ]
