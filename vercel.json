@@ -3,11 +3,11 @@
     { "path": "/api/cron", "schedule": "*/10 * * * *" }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" }
+    { "source": "/api/((?!cron).*)", "destination": "/api/index.ts" }
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/((?!cron).*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, OPTIONS" },
