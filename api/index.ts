@@ -211,6 +211,19 @@ function json(res: VercelResponse, data: any, status = 200) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return json(res, {}, 200)
 
+  // Cron endpoint - auto-refresh teams and bracket
+  const url = req.url || ''
+  if (url === '/api/cron' || url === '/cron') {
+    try {
+      if (!tablesReady) { await ensureTables(); tablesReady = true }
+      await fetchAndStoreTeams()
+      try { await fetchBracket() } catch {}
+      return json(res, { success: true, timestamp: new Date().toISOString() })
+    } catch (e) {
+      return json(res, { error: e.message }, 500)
+    }
+  }
+
   try {
     if (!tablesReady) { await ensureTables(); tablesReady = true }
 
